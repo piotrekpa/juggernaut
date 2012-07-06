@@ -8,7 +8,7 @@ example:
 
 ## Authorization response
 
-    var result = {
+    {
       access : true,
       channels : ['channel1', 'channel2']
-    };
+    }
