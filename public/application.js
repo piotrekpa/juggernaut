@@ -1,11 +1,10 @@
-/*! Socket.IO.js build:0.8.7, development. Copyright(c) 2011 LearnBoost <dev@learnboost.com> MIT Licensed */
+/*! Socket.IO.js build:0.9.6, development. Copyright(c) 2011 LearnBoost <dev@learnboost.com> MIT Licensed */
 
 /**
  * socket.io
  * Copyright(c) 2011 LearnBoost <dev@learnboost.com>
  * MIT Licensed
  */
-
 
 (function (exports, global) {
 
@@ -23,7 +22,7 @@
    * @api public
    */
 
-  io.version = '0.8.7';
+  io.version = '0.9.6';
 
   /**
    * Protocol implemented.
@@ -103,7 +102,6 @@
   };
 
 })('object' === typeof module ? module.exports : (this.io = {}), this);
-
 /**
  * socket.io
  * Copyright(c) 2011 LearnBoost <dev@learnboost.com>
@@ -211,7 +209,7 @@
     for (; i < l; ++i) {
       kv = params[i].split('=');
       if (kv[0]) {
-        query[kv[0]] = decodeURIComponent(kv[1]);
+        query[kv[0]] = kv[1];
       }
     }
 
@@ -271,7 +269,7 @@
 
     if (!xdomain) {
       try {
-        return new ActiveXObject('Microsoft.XMLHTTP');
+        return new window[(['Active'].concat('Object').join('X'))]('Microsoft.XMLHTTP');
       } catch(e) { }
     }
 
@@ -317,7 +315,7 @@
    *
    * @api public
    */
-
+  
   util.merge = function merge (target, additional, deep, lastseen) {
     var seen = lastseen || []
       , depth = typeof deep == 'undefined' ? 2 : deep
@@ -342,7 +340,7 @@
    *
    * @api public
    */
-
+  
   util.mixin = function (ctor, ctor2) {
     util.merge(ctor.prototype, ctor2.prototype);
   };
@@ -400,11 +398,8 @@
    */
 
   util.indexOf = function (arr, o, i) {
-    if (Array.prototype.indexOf) {
-      return Array.prototype.indexOf.call(arr, o, i);
-    }
-
-    for (var j = arr.length, i = i < 0 ? i + j < 0 ? 0 : i + j : i || 0;
+    
+    for (var j = arr.length, i = i < 0 ? i + j < 0 ? 0 : i + j : i || 0; 
          i < j && arr[i] !== o; i++) {}
 
     return j <= i ? -1 : i;
@@ -1270,11 +1265,11 @@
 
   Transport.prototype.onData = function (data) {
     this.clearCloseTimeout();
-
-    // If the connection in currently open (or in a reopening state) reset the close
+    
+    // If the connection in currently open (or in a reopening state) reset the close 
     // timeout since we have just received data. This check is necessary so
     // that we don't reset the timeout on an explicitly disconnected connection.
-    if (this.connected || this.connecting || this.reconnecting) {
+    if (this.socket.connected || this.socket.connecting || this.socket.reconnecting) {
       this.setCloseTimeout();
     }
 
@@ -1299,12 +1294,18 @@
    */
 
   Transport.prototype.onPacket = function (packet) {
+    this.socket.setHeartbeatTimeout();
+
     if (packet.type == 'heartbeat') {
       return this.onHeartbeat();
     }
 
     if (packet.type == 'connect' && packet.endpoint == '') {
       this.onConnect();
+    }
+
+    if (packet.type == 'error' && packet.advice == 'reconnect') {
+      this.open = false;
     }
 
     this.socket.onPacket(packet);
@@ -1317,7 +1318,7 @@
    *
    * @api private
    */
-
+  
   Transport.prototype.setCloseTimeout = function () {
     if (!this.closeTimeout) {
       var self = this;
@@ -1401,7 +1402,7 @@
   Transport.prototype.onHeartbeat = function (heartbeat) {
     this.packet({ type: 'heartbeat' });
   };
-
+ 
   /**
    * Called when the transport opens.
    *
@@ -1466,7 +1467,6 @@
     'undefined' != typeof io ? io : module.exports
   , 'undefined' != typeof io ? io : module.parent.exports
 );
-
 /**
  * socket.io
  * Copyright(c) 2011 LearnBoost <dev@learnboost.com>
@@ -1521,7 +1521,7 @@
         (!this.isXDomain() || io.util.ua.hasCORS)) {
       var self = this;
 
-      io.util.on(global, 'beforeunload', function () {
+      io.util.on(global, 'unload', function () {
         self.disconnectSync();
       }, false);
     }
@@ -1617,6 +1617,7 @@
       var xhr = io.util.request();
 
       xhr.open('GET', url, true);
+      xhr.withCredentials = true;
       xhr.onreadystatechange = function () {
         if (xhr.readyState == 4) {
           xhr.onreadystatechange = empty;
@@ -1671,10 +1672,12 @@
       self.sessionid = sid;
       self.closeTimeout = close * 1000;
       self.heartbeatTimeout = heartbeat * 1000;
-      self.transports = io.util.intersect(
+      self.transports = transports ? io.util.intersect(
           transports.split(',')
         , self.options.transports
-      );
+      ) : self.options.transports;
+
+      self.setHeartbeatTimeout();
 
       function connect (transports){
         if (self.transport) self.transport.clearTimeouts();
@@ -1715,7 +1718,7 @@
         });
       }
 
-      connect();
+      connect(self.transports);
 
       self.once('connect', function (){
         clearTimeout(self.connectTimeoutTimer);
@@ -1725,6 +1728,22 @@
     });
 
     return this;
+  };
+
+  /**
+   * Clears and sets a new heartbeat timeout using the value given by the
+   * server during the handshake.
+   *
+   * @api private
+   */
+
+  Socket.prototype.setHeartbeatTimeout = function () {
+    clearTimeout(this.heartbeatTimeoutTimer);
+
+    var self = this;
+    this.heartbeatTimeoutTimer = setTimeout(function () {
+      self.transport.onClose();
+    }, this.heartbeatTimeout);
   };
 
   /**
@@ -1768,7 +1787,7 @@
    */
 
   Socket.prototype.disconnect = function () {
-    if (this.connected) {
+    if (this.connected || this.connecting) {
       if (this.open) {
         this.of('').packet({ type: 'disconnect' });
       }
@@ -1810,7 +1829,7 @@
     var port = global.location.port ||
       ('https:' == global.location.protocol ? 443 : 80);
 
-    return this.options.host !== global.location.hostname
+    return this.options.host !== global.location.hostname 
       || this.options.port != port;
   };
 
@@ -1850,6 +1869,7 @@
 
   Socket.prototype.onClose = function () {
     this.open = false;
+    clearTimeout(this.heartbeatTimeoutTimer);
   };
 
   /**
@@ -1870,9 +1890,11 @@
 
   Socket.prototype.onError = function (err) {
     if (err && err.advice) {
-      if (err.advice === 'reconnect' && this.connected) {
+      if (err.advice === 'reconnect' && (this.connected || this.connecting)) {
         this.disconnect();
-        this.reconnect();
+        if (this.options.reconnect) {
+          this.reconnect();
+        }
       }
     }
 
@@ -1886,19 +1908,22 @@
    */
 
   Socket.prototype.onDisconnect = function (reason) {
-    var wasConnected = this.connected;
+    var wasConnected = this.connected
+      , wasConnecting = this.connecting;
 
     this.connected = false;
     this.connecting = false;
     this.open = false;
 
-    if (wasConnected) {
+    if (wasConnected || wasConnecting) {
       this.transport.close();
       this.transport.clearTimeouts();
-      this.publish('disconnect', reason);
+      if (wasConnected) {
+        this.publish('disconnect', reason);
 
-      if ('booted' != reason && this.options.reconnect && !this.reconnecting) {
-        this.reconnect();
+        if ('booted' != reason && this.options.reconnect && !this.reconnecting) {
+          this.reconnect();
+        }
       }
     }
   };
@@ -1928,6 +1953,8 @@
         }
         self.publish('reconnect', self.transport.name, self.reconnectionAttempts);
       }
+
+      clearTimeout(self.reconnectionTimer);
 
       self.removeListener('connect_failed', maybeReconnect);
       self.removeListener('connect', maybeReconnect);
@@ -2082,7 +2109,7 @@
    *
    * @api public
    */
-
+  
   SocketNamespace.prototype.emit = function (name) {
     var args = Array.prototype.slice.call(arguments, 1)
       , lastArg = args[args.length - 1]
@@ -2597,7 +2624,11 @@
 
   XHR.check = function (socket, xdomain) {
     try {
-      if (io.util.request(xdomain)) {
+      var request = io.util.request(xdomain),
+          usesXDomReq = (global.XDomainRequest && request instanceof XDomainRequest),
+          socketProtocol = (socket && socket.options && socket.options.secure ? 'https:' : 'http:'),
+          isXProtocol = (socketProtocol != global.location.protocol);
+      if (request && !(usesXDomReq && isXProtocol)) {
         return true;
       }
     } catch(e) {}
@@ -2606,7 +2637,7 @@
   };
 
   /**
-   * Check if the XHR transport supports corss domain requests.
+   * Check if the XHR transport supports cross domain requests.
    *
    * @returns {Boolean}
    * @api public
@@ -2621,7 +2652,6 @@
   , 'undefined' != typeof io ? io : module.parent.exports
   , this
 );
-
 /**
  * socket.io
  * Copyright(c) 2011 LearnBoost <dev@learnboost.com>
@@ -2638,7 +2668,7 @@
 
   /**
    * The HTMLFile transport creates a `forever iframe` based transport
-   * for Internet Explorer. Regular forever iframe implementations will
+   * for Internet Explorer. Regular forever iframe implementations will 
    * continuously trigger the browsers buzy indicators. If the forever iframe
    * is created inside a `htmlfile` these indicators will not be trigged.
    *
@@ -2666,7 +2696,7 @@
   HTMLFile.prototype.name = 'htmlfile';
 
   /**
-   * Creates a new ActiveX `htmlfile` with a forever loading iframe
+   * Creates a new Ac...eX `htmlfile` with a forever loading iframe
    * that can be used to listen to messages. Inside the generated
    * `htmlfile` a reference will be made to the HTMLFile transport.
    *
@@ -2674,7 +2704,7 @@
    */
 
   HTMLFile.prototype.get = function () {
-    this.doc = new ActiveXObject('htmlfile');
+    this.doc = new window[(['Active'].concat('Object').join('X'))]('htmlfile');
     this.doc.open();
     this.doc.write('<html></html>');
     this.doc.close();
@@ -2752,16 +2782,16 @@
 
   /**
    * Checks if the browser supports this transport. The browser
-   * must have an `ActiveXObject` implementation.
+   * must have an `Ac...eXObject` implementation.
    *
    * @return {Boolean}
    * @api public
    */
 
   HTMLFile.check = function () {
-    if ('ActiveXObject' in window){
+    if (typeof window != "undefined" && (['Active'].concat('Object').join('X')) in window){
       try {
-        var a = new ActiveXObject('htmlfile');
+        var a = new window[(['Active'].concat('Object').join('X'))]('htmlfile');
         return a && io.Transport.XHR.check();
       } catch(e){}
     }
@@ -2840,7 +2870,7 @@
 
   XHRPolling.prototype.name = 'xhr-polling';
 
-  /**
+  /** 
    * Establish a connection, for iPhone and Android this will be done once the page
    * is loaded.
    *
@@ -2883,14 +2913,20 @@
 
     function onload () {
       this.onload = empty;
+      this.onerror = empty;
       self.onData(this.responseText);
       self.get();
+    };
+
+    function onerror () {
+      self.onClose();
     };
 
     this.xhr = this.request();
 
     if (global.XDomainRequest && this.xhr instanceof XDomainRequest) {
-      this.xhr.onload = this.xhr.onerror = onload;
+      this.xhr.onload = onload;
+      this.xhr.onerror = onerror;
     } else {
       this.xhr.onreadystatechange = stateChange;
     }
@@ -2908,7 +2944,7 @@
     io.Transport.XHR.prototype.onClose.call(this);
 
     if (this.xhr) {
-      this.xhr.onreadystatechange = this.xhr.onload = empty;
+      this.xhr.onreadystatechange = this.xhr.onload = this.xhr.onerror = empty;
       try {
         this.xhr.abort();
       } catch(e){}
@@ -3035,8 +3071,9 @@
 
       form.className = 'socketio';
       form.style.position = 'absolute';
-      form.style.top = '-1000px';
-      form.style.left = '-1000px';
+      form.style.top = '0px';
+      form.style.left = '0px';
+      form.style.display = 'none';
       form.target = id;
       form.method = 'POST';
       form.setAttribute('accept-charset', 'utf-8');
@@ -3096,7 +3133,7 @@
 
     this.socket.setBuffer(true);
   };
-
+  
   /**
    * Creates a new JSONP poll that can be used to listen
    * for messages from the Socket.IO server.
